@@ -37,22 +37,49 @@ namespace WorkflowCore.Services
             _executionResultProcessor = executionResultProcessor;
         }
 
+        private Queue<ExecutionPointer> runningEps;
+
+        private ExecutionPointer GetRunnableExecutionPointer(WorkflowInstance workflow)
+        {
+            foreach (var ep in workflow.ExecutionPointers)
+            {
+                if (ep.Active && (!ep.SleepUntil.HasValue || ep.SleepUntil < _datetimeProvider.UtcNow))
+                {
+                    if (ep.Status == PointerStatus.Pending)
+                    {
+                        return ep;
+                    }
+                }
+            }
+
+            return runningEps.Count > 0 ? runningEps.Dequeue() : null;
+        }
+
         public async Task<WorkflowExecutorResult> Execute(WorkflowInstance workflow)
         {
             var wfResult = new WorkflowExecutorResult();
+            
+            runningEps = new Queue<ExecutionPointer>();
+            foreach (var ep in workflow.ExecutionPointers.Where(x => x.Active && x.Status != PointerStatus.Pending && (!x.SleepUntil.HasValue || x.SleepUntil < _datetimeProvider.UtcNow)))
+            {
+                runningEps.Enqueue(ep);
+            }
 
-            var exePointers = new List<ExecutionPointer>(workflow.ExecutionPointers.Where(x => x.Active && (!x.SleepUntil.HasValue || x.SleepUntil < _datetimeProvider.UtcNow)));
             var def = _registry.GetDefinition(workflow.WorkflowDefinitionId, workflow.Version);
             if (def == null)
             {
                 _logger.LogError("Workflow {0} version {1} is not registered", workflow.WorkflowDefinitionId, workflow.Version);
                 return wfResult;
             }
-            
-            _cancellationProcessor.ProcessCancellations(workflow, def, wfResult);
 
-            foreach (var pointer in exePointers)
+            do
             {
+                _cancellationProcessor.ProcessCancellations(workflow, def, wfResult);
+                var pointer = GetRunnableExecutionPointer(workflow);
+
+                if (pointer == null)
+                    break;
+
                 if (!pointer.Active)
                     continue;
 
@@ -70,11 +97,11 @@ namespace WorkflowCore.Services
                     });
                     continue;
                 }
-                
+
                 try
                 {
-                    if (!InitializeStep(workflow, step, wfResult, def, pointer)) 
-                        continue;
+                    if (!InitializeStep(workflow, step, wfResult, def, pointer))
+                        break;
 
                     await ExecuteStep(workflow, step, pointer, wfResult, def);
                 }
@@ -88,12 +115,12 @@ namespace WorkflowCore.Services
                         ErrorTime = _datetimeProvider.UtcNow,
                         Message = ex.Message
                     });
-                        
+
                     _executionResultProcessor.HandleStepException(workflow, def, pointer, step, ex);
                     Host.ReportStepError(workflow, step, ex);
                 }
-                _cancellationProcessor.ProcessCancellations(workflow, def, wfResult);
-            }
+                
+            } while (true);
             ProcessAfterExecutionIteration(workflow, def, wfResult);
             DetermineNextExecutionTime(workflow);
 
