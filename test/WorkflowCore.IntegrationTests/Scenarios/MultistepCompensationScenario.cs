@@ -10,6 +10,7 @@ using WorkflowCore.Testing;
 
 namespace WorkflowCore.IntegrationTests.Scenarios
 {
+    
     public class MultistepCompensationScenario : WorkflowTest<MultistepCompensationScenario.Workflow, Object>
     {
         public class Step1 : StepBody

@@ -15,7 +15,14 @@ namespace WorkflowCore.IntegrationTests.Scenarios
     {
         public class Data
         {
+            public Data()
+            {
+                CompensationData = new Dictionary<int, Dictionary<string, object>>();
+            }
+            
             public string Id { get; set; }
+            
+            public Dictionary<int, Dictionary<string, object>> CompensationData { get; set; }
         }
 
         public class PrepareDataStep : StepBody
@@ -44,6 +51,32 @@ namespace WorkflowCore.IntegrationTests.Scenarios
             }
         }
         
+        public class CompensateDataStep : StepBody
+        {
+            public int StepId { get; set; }
+            
+            public string Id { get; set; }
+
+            public override ExecutionResult Run(IStepExecutionContext context)
+            {
+                switch (StepId)
+                {
+                    case 1:
+                    {
+                        Workflow.CompensationData1 = Id;
+                        break;
+                    }
+                    case 2:
+                    {
+                        Workflow.CompensationData2 = Id;
+                        break;
+                    }
+                }
+                
+                return ExecutionResult.Next();
+            }
+        }
+        
         public class Workflow : IWorkflow<Data>
         {
             public static string CompensationData1;
@@ -63,20 +96,32 @@ namespace WorkflowCore.IntegrationTests.Scenarios
                         .CompensateWithSequence(context =>
                             context.StartWith<PrepareDataStep>()
                                 .Input(step => step.StepId, data => 1)
-                                .Output(data => data.Id, step => step.Id)
-                                .Then(then =>
+                                .Output((step, data) =>
                                 {
-                                    CompensationData1 = ((Data) then.Workflow.Data).Id;
-                                }))
+                                    if (!data.CompensationData.ContainsKey(1))
+                                    {
+                                        data.CompensationData[1] = new Dictionary<string, object>();
+                                    }
+                                    data.CompensationData[1]["Id"] = step.Id;
+                                })
+                                .Then<CompensateDataStep>()
+                                .Input(step => step.StepId, data => 1)
+                                .Input(step => step.Id, data => (string)data.CompensationData[1]["Id"]))
                         .Then(context => ExecutionResult.Next())
                         .CompensateWithSequence(context =>
                             context.StartWith<PrepareDataStep>()
                                 .Input(step => step.StepId, data => 2)
-                                .Output(data => data.Id, step => step.Id)
-                                .Then(then =>
+                                .Output((step, data) =>
                                 {
-                                    CompensationData2 = ((Data) then.Workflow.Data).Id;
-                                }))
+                                    if (!data.CompensationData.ContainsKey(2))
+                                    {
+                                        data.CompensationData[2] = new Dictionary<string, object>();
+                                    }
+                                    data.CompensationData[2]["Id"] = step.Id;
+                                })
+                                .Then<CompensateDataStep>()
+                                .Input(step => step.StepId, data => 2)
+                                .Input(step => step.Id, data => (string)data.CompensationData[2]["Id"]))
                         .Then(context => throw new Exception()));
             }
         }
@@ -89,7 +134,7 @@ namespace WorkflowCore.IntegrationTests.Scenarios
         [Fact]
         public void MultiCompensationStepOrder()
         {
-            var workflowId = StartWorkflow(null);
+            var workflowId = StartWorkflow(new Data());
             WaitForWorkflowToComplete(workflowId, TimeSpan.FromSeconds(30));
 
             GetStatus(workflowId).Should().Be(WorkflowStatus.Complete);
