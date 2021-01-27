@@ -35,12 +35,28 @@ namespace Microsoft.Extensions.DependencyInjection
 
             services.AddSingleton<IWorkflowRegistry, WorkflowRegistry>();
             services.AddSingleton<WorkflowOptions>(options);
-            services.AddSingleton<ILifeCycleEventPublisher, LifeCycleEventPublisher>();            
+            services.AddSingleton<ILifeCycleEventPublisher, LifeCycleEventPublisher>();
 
-            services.AddTransient<IBackgroundTask, WorkflowConsumer>();
-            services.AddTransient<IBackgroundTask, EventConsumer>();
-            services.AddTransient<IBackgroundTask, IndexConsumer>();
-            services.AddTransient<IBackgroundTask, RunnablePoller>();
+            if (options.EnableWorkflows)
+            {
+                services.AddTransient<IBackgroundTask, WorkflowConsumer>();
+            }
+
+            if (options.EnableEvents)
+            {
+                services.AddTransient<IBackgroundTask, EventConsumer>();
+            }
+
+            if (options.EnableIndexes)
+            {
+                services.AddTransient<IBackgroundTask, IndexConsumer>();
+            }
+
+            if (options.EnablePolling)
+            {
+                services.AddTransient<IBackgroundTask, RunnablePoller>();
+            }
+
             services.AddTransient<IBackgroundTask>(sp => sp.GetService<ILifeCycleEventPublisher>());
 
             services.AddTransient<IWorkflowErrorHandler, CompensateHandler>();
@@ -52,6 +68,9 @@ namespace Microsoft.Extensions.DependencyInjection
             services.AddSingleton<IWorkflowController, WorkflowController>();
             services.AddSingleton<IActivityController, ActivityController>();
             services.AddSingleton<IWorkflowHost, WorkflowHost>();
+            services.AddTransient<IStepExecutor, StepExecutor>();
+            services.AddTransient<IWorkflowMiddlewareErrorHandler, DefaultWorkflowMiddlewareErrorHandler>();
+            services.AddTransient<IWorkflowMiddlewareRunner, WorkflowMiddlewareRunner>();
             services.AddTransient<IScopeProvider, ScopeProvider>();
             services.AddTransient<IWorkflowExecutor, WorkflowExecutor>();
             services.AddTransient<ICancellationProcessor, CancellationProcessor>();
@@ -69,6 +88,40 @@ namespace Microsoft.Extensions.DependencyInjection
 
             return services;
         }
+
+        /// <summary>
+        /// Adds a middleware that will run around the execution of a workflow step.
+        /// </summary>
+        /// <param name="services">The services collection.</param>
+        /// <param name="factory">Optionally configure using your own factory.</param>
+        /// <typeparam name="TMiddleware">The type of middleware.
+        /// It must implement <see cref="IWorkflowStepMiddleware"/>.</typeparam>
+        /// <returns>The services collection for chaining.</returns>
+        public static IServiceCollection AddWorkflowStepMiddleware<TMiddleware>(
+            this IServiceCollection services,
+            Func<IServiceProvider, TMiddleware> factory = null)
+            where TMiddleware : class, IWorkflowStepMiddleware =>
+                factory == null
+                    ? services.AddTransient<IWorkflowStepMiddleware, TMiddleware>()
+                    : services.AddTransient<IWorkflowStepMiddleware, TMiddleware>(factory);
+
+        /// <summary>
+        /// Adds a middleware that will run either before a workflow is kicked off or after
+        /// a workflow completes. Specify the phase of the workflow execution process that
+        /// you want to execute this middleware using <see cref="IWorkflowMiddleware.Phase"/>.
+        /// </summary>
+        /// <param name="services">The services collection.</param>
+        /// <param name="factory">Optionally configure using your own factory.</param>
+        /// <typeparam name="TMiddleware">The type of middleware.
+        /// It must implement <see cref="IWorkflowMiddleware"/>.</typeparam>
+        /// <returns>The services collection for chaining.</returns>
+        public static IServiceCollection AddWorkflowMiddleware<TMiddleware>(
+            this IServiceCollection services,
+            Func<IServiceProvider, TMiddleware> factory = null)
+            where TMiddleware : class, IWorkflowMiddleware =>
+                factory == null
+                    ? services.AddTransient<IWorkflowMiddleware, TMiddleware>()
+                    : services.AddTransient<IWorkflowMiddleware, TMiddleware>(factory);
     }
 }
 

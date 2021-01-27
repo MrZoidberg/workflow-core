@@ -68,8 +68,22 @@ namespace WorkflowCore.Services.DefinitionStorage
                 var nextStep = stack.Pop();
 
                 var stepType = FindType(nextStep.StepType);
-                var containerType = typeof(WorkflowStep<>).MakeGenericType(stepType);
-                var targetStep = (containerType.GetConstructor(new Type[] { }).Invoke(null) as WorkflowStep);
+
+                WorkflowStep targetStep;
+
+                Type containerType;
+                if (stepType.GetInterfaces().Contains(typeof(IStepBody)))
+                {
+                    containerType = typeof(WorkflowStep<>).MakeGenericType(stepType);
+
+                    targetStep = (containerType.GetConstructor(new Type[] { }).Invoke(null) as WorkflowStep);
+                }
+                else
+                {
+                    targetStep = stepType.GetConstructor(new Type[] { }).Invoke(null) as WorkflowStep;
+                    if (targetStep != null)
+                        stepType = targetStep.BodyType;
+                }
 
                 if (nextStep.Saga)
                 {
@@ -93,7 +107,7 @@ namespace WorkflowCore.Services.DefinitionStorage
 
                 AttachInputs(nextStep, dataType, stepType, targetStep);
                 AttachOutputs(nextStep, dataType, stepType, targetStep);
-                
+
                 if (nextStep.Do != null)
                 {
                     foreach (var branch in nextStep.Do)
@@ -242,7 +256,7 @@ namespace WorkflowCore.Services.DefinitionStorage
             var outcomeParameter = Expression.Parameter(typeof(object), "outcome");
 
             foreach (var nextStep in source.SelectNextStep)
-            {                
+            {
                 var sourceDelegate = DynamicExpressionParser.ParseLambda(new[] { dataParameter, outcomeParameter }, typeof(object), nextStep.Value).Compile();
                 Expression<Func<object, object, bool>> sourceExpr = (data, outcome) => System.Convert.ToBoolean(sourceDelegate.DynamicInvoke(data, outcome));
                 step.Outcomes.Add(new ExpressionOutcome<object>(sourceExpr)
